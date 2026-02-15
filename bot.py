@@ -3,12 +3,9 @@ import re
 import asyncio
 import json
 from datetime import datetime
-from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
-from pyrogram.enums import ParseMode
-import yt_dlp
 from pathlib import Path
 import logging
+import sys
 
 # Setup logging
 logging.basicConfig(
@@ -17,13 +14,25 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Fix for Python 3.14 event loop issue
-import sys
+# CRITICAL FIX: Create event loop BEFORE importing pyrogram
 if sys.version_info >= (3, 14):
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+else:
+    # For older Python versions, ensure an event loop exists
     try:
         asyncio.get_event_loop()
     except RuntimeError:
         asyncio.set_event_loop(asyncio.new_event_loop())
+
+# Now import pyrogram after event loop is created
+from pyrogram import Client, filters
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
+from pyrogram.enums import ParseMode
+import yt_dlp
 
 # Bot configuration
 API_ID = os.environ.get("API_ID")
@@ -176,6 +185,15 @@ async def download_youtube_video(url, output_path, progress_msg=None):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             filename = ydl.prepare_filename(info)
+            
+            # Handle potential filename issues
+            if not os.path.exists(filename):
+                # Try to find the actual file
+                base = os.path.splitext(filename)[0]
+                for ext in ['.mp4', '.mkv', '.webm']:
+                    if os.path.exists(base + ext):
+                        filename = base + ext
+                        break
             
             return {
                 'file': filename,
@@ -537,7 +555,7 @@ async def message_handler(client, message):
                     
                     result = await download_youtube_video(video_url, output_dir, status_msg)
                     
-                    if result:
+                    if result and os.path.exists(result['file']):
                         # Extract episode number
                         ep_num = extract_episode_number(result['title'])
                         duration = format_duration(result['duration'])
@@ -575,11 +593,15 @@ async def message_handler(client, message):
                             await asyncio.sleep(2)
                     else:
                         failed_count += 1
+                        if result:
+                            logger.error(f"File not found: {result.get('file')}")
                 
-                # Cleanup
+                # Cleanup directory
                 try:
                     if os.path.exists(output_dir):
-                        os.rmdir(output_dir)
+                        # Check if directory is empty
+                        if not os.listdir(output_dir):
+                            os.rmdir(output_dir)
                 except:
                     pass
                 
