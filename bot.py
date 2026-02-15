@@ -9,6 +9,15 @@ from pyrogram.enums import ParseMode
 import yt_dlp
 from pathlib import Path
 
+# Fix for Python 3.14 event loop issue
+import sys
+if sys.version_info >= (3, 14):
+    import asyncio
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+
 # Bot configuration
 API_ID = os.environ.get("API_ID")
 API_HASH = os.environ.get("API_HASH")
